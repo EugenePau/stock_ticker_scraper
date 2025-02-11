@@ -1,57 +1,121 @@
-import feedparser
-import csv
+import pandas as pd
+import requests
+import re
+import time
+import mplfinance as mpf
+import matplotlib.pyplot as plt
+import matplotlib.font_manager as fm
 from datetime import datetime
-import os
 
-# 定義 RSS Feed 網址 (使用正確的 RSS feed URLs)
-rss_urls = [
-    "https://finance.yahoo.com/rss/headline?s=WELL",  # Yahoo Finance: WELL
-    "https://tw.stock.yahoo.com/rss?q=%E6%88%BF%E5%9C%B0%E7%94%A2"  # TW real estate news
-]
+# 設定字體
+zhfont = fm.FontProperties(fname=r'C:\Windows\Fonts\kaiu.ttf')  # 使用原始字串
+plt.rcParams['font.family'] = zhfont.get_name()
 
-def fetch_and_save_rss():
-    print("開始抓取 RSS feeds...")
-    all_entries = []
-    
-    for url in rss_urls:
-        print(f"正在處理: {url}")
+# 定義下載資料的函數
+def fetch_data(date, stock_no):
+    url = f'http://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date={date}&stockNo={stock_no}'
+    max_retries = 5
+    for i in range(max_retries):
         try:
-            feed = feedparser.parse(url)
-            
-            if feed.bozo:
-                print(f"解析錯誤: {feed.bozo_exception}")
-                continue
-                
-            print(f"找到 {len(feed.entries)} 筆文章")
-            
-            for entry in feed.entries:
-                # 存入標題、連結和發布時間
-                all_entries.append([
-                    entry.title if hasattr(entry, 'title') else 'No Title',
-                    entry.link if hasattr(entry, 'link') else 'No Link',
-                    entry.published if hasattr(entry, 'published') else 'No Date'
-                ])
-                print(f"標題: {entry.title if hasattr(entry, 'title') else 'No Title'}")
-                
-        except Exception as e:
-            print(f"處理 {url} 時發生錯誤: {str(e)}")
+            response = requests.get(url)
+            response.raise_for_status()  # 如果請求失敗，則引發異常
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            print(f'Error fetching data for {date}: {e}. Retry {i + 1}/{max_retries}')
+            time.sleep(3)
+    raise Exception(f'Failed to fetch data for {date} after {max_retries} retries')
 
-    # 檢查是否有資料要儲存
-    if not all_entries:
-        print("沒有找到任何文章")
-        return
+# 定義下載和合併資料的函數
+def download_stock_data(start_year, start_month, end_year, end_month, stock_no='2330'):
+    data_frames = []
+    for year in range(start_year, end_year + 1):
+        start_m = start_month if year == start_year else 1
+        end_m = end_month if year == end_year else 12
+        for month in range(start_m, end_m + 1):
+            date_str = f'{year}{month:02d}01'
+            try:
+                json_data = fetch_data(date_str, stock_no)
+                columns = ['日期', '成交股數', '成交金額', '開盤價', '最高價', '最低價', '收盤價', '漲跌價差', '成交筆數']
+                df = pd.DataFrame(json_data['data'], columns=columns)
+                data_frames.append(df)
+            except Exception as e:
+                print(f'Error fetching data for {date_str}: {e}')
+            # 跳過未來的月份
+            current_date = datetime.now()
+            if year == current_date.year and month >= current_date.month:
+                break
+    all_data = pd.concat(data_frames, ignore_index=True)
+    return all_data
 
-    # 儲存到 CSV 文件
-    csv_filename = "rss_feed_data.csv"
-    try:
-        with open(csv_filename, "a", newline="", encoding="utf-8") as csvfile:
-            writer = csv.writer(csvfile)
-            writer.writerow(["標題", "連結", "發布時間"])
-            writer.writerows(all_entries)
-        print(f"成功儲存至 {os.path.abspath(csv_filename)}")
-    except Exception as e:
-        print(f"儲存 CSV 時發生錯誤: {str(e)}")
+# 日期轉換和資料清洗
+def clean_data(all_data):
+    all_data['日期'] = all_data['日期'].apply(lambda x: re.sub(r'(\d+)(/\d+/\d+)', lambda y: str(int(y.group(1)) + 1911) + y.group(2), x))
+    all_data[['成交股數', '成交金額', '成交筆數']] = all_data[['成交股數', '成交金額', '成交筆數']].replace(',', '', regex=True)
 
-print('開始執行...')
-fetch_and_save_rss()
-print('執行完成')
+    # 移除無法轉換為數字的異常值
+    def to_float(x):
+        try:
+            return float(x)
+        except ValueError:
+            return float('nan')
+
+    all_data.iloc[:, 1:] = all_data.iloc[:, 1:].applymap(to_float)
+
+    # 轉換成交股數和成交金額的單位
+    all_data[['成交股數', '成交金額']] = all_data[['成交股數', '成交金額']] / 1000
+    all_data = all_data.rename(columns={'成交股數': '成交張數'})
+
+    # 移除包含 NaN 的行
+    all_data = all_data.dropna()
+
+    # 轉換日期為日期格式
+    all_data['日期'] = pd.to_datetime(all_data['日期'])
+
+    # 重命名列以符合 mplfinance 的要求
+    all_data = all_data.rename(columns={
+        '開盤價': 'Open',
+        '最高價': 'High',
+        '最低價': 'Low',
+        '收盤價': 'Close',
+        '成交張數': 'Volume'
+    })
+
+    # 確保所有列都轉換為浮點數類型
+    all_data['Open'] = all_data['Open'].astype(float)
+    all_data['High'] = all_data['High'].astype(float)
+    all_data['Low'] = all_data['Low'].astype(float)
+    all_data['Close'] = all_data['Close'].astype(float)
+    all_data['Volume'] = all_data['Volume'].astype(float)
+
+    # 設置日期為索引
+    all_data.set_index('日期', inplace=True)
+
+    return all_data
+
+# 主程序
+start_year = 2024
+start_month = 4
+end_year = 2024
+end_month = 6
+
+all_data = download_stock_data(start_year, start_month, end_year, end_month)
+cleaned_data = clean_data(all_data)
+print(cleaned_data)
+
+cleaned_data.to_csv("all_data.txt", sep="\t", encoding="utf-8-sig", index=True)
+
+print("✅ 成功將 all_data 寫入 all_data.txt")
+
+# 繪製 K 線圖
+def plot_data(all_data, title):
+    fig, ax = plt.subplots()
+
+    # mplfinance.plot 函數不接受 fontproperties 這個參數。
+    # 相反，我們可以在設置標題和標籤時手動指定字體屬性。
+    mpf.plot(all_data, type='candle', style='charles', ax=ax, warn_too_much_data=len(all_data) + 1)
+    ax.set_title(title, fontproperties=zhfont)
+    ax.set_ylabel('價格', fontproperties=zhfont)
+    plt.show()
+    
+# 這邊改一下圖表上的名稱為 台積電
+plot_data(cleaned_data, f'台積電 {start_year}/{start_month} - {end_year}/{end_month} 每日股票交易價格和收盤情況')
