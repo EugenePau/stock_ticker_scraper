@@ -20,6 +20,12 @@ jobs:
 
       - name: 📦 安裝 `feedparser`
         run: pip install feedparser
+        run: pip install pandas
+        run: pip install requests
+        run: pip install re
+        run: pip install time
+        run: pip install mplfinance as mpf
+        run: pip install datetime import datetime
 
       - name: 📰 執行 `scraper.py`
         run: python scraper.py
