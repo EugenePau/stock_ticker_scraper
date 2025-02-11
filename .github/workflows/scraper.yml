@@ -2,32 +2,28 @@ name: Scrape Yahoo Finance Tickers
 
 on:
   schedule:
-    - cron: "0 12 * * *"  # 每天 UTC 12:00 自動執行
-  workflow_dispatch:  # 允許手動觸發
+    - cron: "0 12 * * *"  # Runs every day at 12:00 UTC
+  workflow_dispatch:  # Allows manual trigger
 
 jobs:
   scrape:
     runs-on: ubuntu-latest
 
     steps:
-      - name: ✅ 檢出 Repository
+      - name: ✅ Checkout Repository
         uses: actions/checkout@v4
 
-      - name: 🛠️ 設定 Python 環境
+      - name: 🛠️ Set Up Python Environment
         uses: actions/setup-python@v4
         with:
           python-version: "3.x"
 
-      - name: 📦 安裝 `feedparser`
-        run: pip install feedparser
-        run: pip install pandas
-        run: pip install requests
-        run: pip install re
-        run: pip install time
-        run: pip install mplfinance as mpf
-        run: pip install datetime import datetime
+      - name: 📦 Install Dependencies
+        run: |
+          pip install feedparser
+          pip install pandas
+          pip install requests
+          pip install mplfinance  # Fixed incorrect install syntax
 
-      - name: 📰 執行 `scraper.py`
+      - name: 📰 Run `scraper.py`
         run: python scraper.py
-
-
