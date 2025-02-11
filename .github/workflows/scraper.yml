@@ -1,0 +1,33 @@
+name: Scrape Yahoo Finance Tickers
+
+on:
+  schedule:
+    - cron: "0 12 * * *"  # 每天 UTC 12:00 自動執行
+  workflow_dispatch:  # 允許手動觸發
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: ✅ 檢出 Repository
+        uses: actions/checkout@v4
+
+      - name: 🛠️ 設定 Python 環境
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.x"
+
+      - name: 📦 安裝 `feedparser`
+        run: pip install feedparser
+
+      - name: 📰 執行 `scraper.py`
+        run: python scraper.py
+
+      - name: 🔄 檢查是否有變更
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add headlines.txt
+          git commit -m "🔄 更新 Yahoo News 頭條新聞" || echo "⚠️ 沒有新變更，跳過提交"
+          git push || echo "⚠️ 沒有新變更，跳過推送"
